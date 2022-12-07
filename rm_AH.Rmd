@@ -4,26 +4,137 @@ output: html_document
 date: "2022-11-23"
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+
+```{r}
+#may not need all these libraries
+library(dplyr)
+library(sf)
+library(tidyverse)
+library(ggplot2)
+library(leaflet)
+library(leaflet.extras)
+library(leaflet.extras2)
+library(htmltools)
+library(htmlwidgets)
+library(splitstackshape)
+library(RColorBrewer)
+library(viridisLite)
 ```
 
-## R Markdown
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+```{r}
+sales <- read_csv("filtered_sales.csv")
+LIHTC <- read_csv("LIHTC.csv")
+properties <- read_csv("property_details.csv")
+barnes <- read_csv("barnes.csv")
+assessments <- read_csv("assessments.csv")
+```
+```{r}
+assessments
+sales
+LIHTC
+properties
+barnes
+```
+```{r}
+LIHTC <- st_as_sf(LIHTC, coords =c("LONGITUDE","LATITUDE"), crs =4326) #convert to sf object
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r}
+nash <- st_read("Davidson.geojson") #this is Davidson county border for plotting
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+properties$centroid <- gsub("[()]", "", properties$centroid) #remove () from coordinates
+properties
+```
+
+```{r}
+properties <- cSplit(properties, "centroid", ",") #split coordinates into lat and lon
+names(properties)[names(properties) == 'centroid_1'] <- 'lon'
+names(properties)[names(properties) == 'centroid_2'] <- 'lat'
+properties
+```
+
+```{r}
+properties <- drop_na(properties)
+```
+
+
+```{r}
+properties <- st_as_sf(properties, coords =c("lon","lat"), crs =4326) #convert to sf
+```
+```{r}
+properties
+```
+
+
+
+```{r}
+# simple map of locations within Davidson County
+nash %>% 
+leaflet()  %>% 
+    addProviderTiles("CartoDB.Positron")  %>% 
+    addPolygons(color ="white", opacity=5) %>%
+    addCircleMarkers(data = LIHTC, radius = 1 , popup = LIHTC$PROJECT, color="red") %>%
+    setView(lat = 36.1627, lng = -86.7816, zoom = 11)
+```
+
+```{r}
+#1. Using the sf library, find the closest development to each home.
+nearest <- st_nearest_feature(properties, LIHTC) #find nearest properties https://gis.stackexchange.com/questions/349955/getting-a-new-column-with-distance-to-the-nearest-feature-in-r
+```
+
+
+```{r}
+# 2. Calculate the distance from each home its closest development.
+dist_miles = st_distance(properties, LIHTC[nearest,], by_element=TRUE) %>% 
+units::set_units(mi) #without this, the default is in meters
+dist_miles
+```
+```{r}
+p_join = cbind(properties, st_drop_geometry(LIHTC)[nearest,])
+p_join
+```
+```{r}
+p_join$distance <- dist_miles
+p_join
+```
+
+
+```{r}
+p_join$distance <- gsub("[mi]", "", p_join$distance) #remove mi
+p_join
+```
+
+
+
+```{r}
+# 3. Filter the homes down to those that are within one mile of an affordable housing development.
+one_mile <- p_join %>% #filter down to homes within 1 mile
+  filter(p_join$distance<1)
+```
+
+```{r}
+one_mile
+```
+```{r}
+# map of properties within one mile 
+nash %>% 
+leaflet()  %>% 
+    addProviderTiles("Stamen.TonerHybrid")  %>% 
+    addPolygons(color ="grey", opacity=1) %>%
+    addCircleMarkers(data = one_mile, radius = 1 , popup = one_mile$PROJECT, 
+                     color="blue", opacity=0.1, clusterOptions = markerClusterOptions()) %>%
+    addCircleMarkers(data = LIHTC, radius = 4 , popup = LIHTC$PROJECT, color="red") %>%
+    setView(lat = 36.1627, lng = -86.7816, zoom = 11)
+```
+```{r}
+one_mile <- merge(one_mile, sales, by.x = "apn", by.y = "apn")
+one_mile
+```
+
+
+
