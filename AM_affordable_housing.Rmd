@@ -1,5 +1,12 @@
 ```{r}
 library(tidyverse)
+library(sf)
+library(leaflet)
+library(htmltools)
+library(scales)
+library(ggplot2)
+library(splitstackshape)
+library(dplyr)
 ```
 
 ```{r}
@@ -7,28 +14,96 @@ property_details<- read_csv('Affordable_Housing_DS6/property_details.csv')
 assessments<- read_csv('Affordable_Housing_DS6/assessments.csv')
 full_sales<- read_csv('Affordable_Housing_DS6/full_sales.csv')
 filtered_sales<- read_csv('Affordable_Housing_DS6/filtered_sales.csv')
-
 barnes<- read_csv('Affordable_Housing_DS6/barnes.csv')
 LIHTC<- read_csv('Affordable_Housing_DS6/LIHTC.csv')
 ```
 
 ```{r}
-install.packages("sf")
-```
-
-
-
-
-```{r}
-library(data.table)
-library(sf)
+assessments
+filtered_sales
+LIHTC
+property_details
+barnes
 ```
 
 ```{r}
-LIHTC <- st_as_sf(LIHTC, coords =c("LONGITUDE","LATITUDE"), crs =4326)
+LIHTC <- st_as_sf(LIHTC, coords =c("LONGITUDE","LATITUDE"), crs = 4326)
 ```
 
 ```{r}
+# Davidson county coordinates
+map <- leaflet() %>%
+  addProviderTiles(provider = "CartoDB.Positron") %>%
+  setView(lng = -86.7819, lat = 36.1766, zoom = 10) %>%
+  setMaxBounds(lng1 = -86.7819 + 1,
+               lat1 = 36.1766 + 1,
+               lng2 = -86.7819- 1,
+               lat2 = 36.1766 - 1)
 
+map
 ```
 
+```{r}
+property_details$centroid <- gsub("[()]", "", property_details$centroid) #gsub function to remove () from centroid column
+property_details
+```
+
+```{r}
+property_details <- cSplit(property_details, "centroid", ",") %>%
+rename("longitude" = "centroid_1","latitude" = "centroid_2")
+property_details
+```
+
+```{r}
+property_details <- drop_na(property_details) 
+```
+
+```{r}
+property_details <- st_as_sf(property_details, coords =c("longitude","latitude"), crs = 4326)
+property_details
+```
+
+```{r}
+nearest_AH <- st_nearest_feature(property_details,LIHTC)
+nearest_AH
+```
+
+```{r}
+distance_miles <- st_distance(property_details, LIHTC[nearest_AH,], by_element = T) %>%
+units::set_units(mi)
+distance_miles
+```
+
+
+```{r}
+Merged <- cbind (property_details, LIHTC[nearest_AH,])
+Merged
+```
+
+
+```{r}
+# Add circle marker styling options
+map <- leaflet() %>%
+  addProviderTiles(provider = "CartoDB.Positron") %>%
+  setView(lng = -86.7819, lat = 36.1766, zoom = 10) %>%
+  setMaxBounds(lng1 = -86.7819 + 1,
+               lat1 = 36.1766 + 1,
+               lng2 = -86.7819- 1,
+               lat2 = 36.1766 - 1) %>%
+  addCircleMarkers(data = Merged,
+                   radius = 1,
+                   color = "white",
+                   weight = 0.25,
+                   fillColor = "red",
+                   fillOpacity = 0.75)
+
+map
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
