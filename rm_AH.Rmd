@@ -37,6 +37,12 @@ properties
 barnes
 ```
 ```{r}
+sales <- sales[!duplicated(sales), ]
+sales
+```
+
+
+```{r}
 LIHTC <- st_as_sf(LIHTC, coords =c("LONGITUDE","LATITUDE"), crs =4326) #convert to sf object
 ```
 
@@ -59,18 +65,11 @@ properties
 ```
 
 ```{r}
-properties <- drop_na(properties)
-```
-
-
-```{r}
 properties <- st_as_sf(properties, coords =c("lon","lat"), crs =4326) #convert to sf
 ```
 ```{r}
 properties
 ```
-
-
 
 ```{r}
 # simple map of locations within Davidson County
@@ -83,19 +82,24 @@ leaflet()  %>%
 ```
 
 ```{r}
+lihtc_drop <- LIHTC[-c(1, 2, 3, 4, 5), ]
+```
+
+
+```{r}
 #1. Using the sf library, find the closest development to each home.
-nearest <- st_nearest_feature(properties, LIHTC) #find nearest properties https://gis.stackexchange.com/questions/349955/getting-a-new-column-with-distance-to-the-nearest-feature-in-r
+nearest <- st_nearest_feature(properties, lihtc_drop) #find nearest properties https://gis.stackexchange.com/questions/349955/getting-a-new-column-with-distance-to-the-nearest-feature-in-r
 ```
 
 
 ```{r}
 # 2. Calculate the distance from each home its closest development.
-dist_miles = st_distance(properties, LIHTC[nearest,], by_element=TRUE) %>% 
+dist_miles = st_distance(properties, lihtc_drop[nearest,], by_element=TRUE) %>% 
 units::set_units(mi) #without this, the default is in meters
 dist_miles
 ```
 ```{r}
-p_join = cbind(properties, st_drop_geometry(LIHTC)[nearest,])
+p_join = cbind(properties, st_drop_geometry(lihtc_drop)[nearest,])
 p_join
 ```
 ```{r}
@@ -128,7 +132,7 @@ leaflet()  %>%
     addPolygons(color ="grey", opacity=1) %>%
     addCircleMarkers(data = one_mile, radius = 1 , popup = one_mile$PROJECT, 
                      color="blue", opacity=0.1, clusterOptions = markerClusterOptions()) %>%
-    addCircleMarkers(data = LIHTC, radius = 4 , popup = LIHTC$PROJECT, color="red") %>%
+    addCircleMarkers(data = lihtc_drop, radius = 4 , popup = lihtc_drop$PROJECT, color="red") %>%
     setView(lat = 36.1627, lng = -86.7816, zoom = 11)
 ```
 ```{r}
@@ -136,5 +140,67 @@ one_mile <- merge(one_mile, sales, by.x = "apn", by.y = "apn")
 one_mile
 ```
 
+```{r}
+#one_mile <- merge(one_mile, assessments, by.x = "apn", by.y = "apn")
+one_mile
+```
 
+# testing out case_when function
+```{r}
+one_mile<- one_mile%>% 
+       mutate(half_mile = case_when(distance < 0.5 ~ "less than",
+                                        TRUE ~ "more than"))
+one_mile
+```
+
+```{r}
+table(one_mile$half_mile)
+```
+
+```{r}
+one_mile$ownerdate <- format(as.Date(one_mile$ownerdate, format="%Y/%m/%d"),"%Y")
+one_mile
+```
+
+```{r}
+one_mile$ownerdate <- as.numeric(as.character(one_mile$ownerdate))
+```
+
+
+4. For each remaining home, calculate a new column called "group", which is defined according to the following rules. Hint: Use the case_when function to do this.
+
+```{r}
+one_mile <- one_mile %>% 
+       mutate(group = case_when(half_mile == "less than" & ownerdate<=(YR_PIS - 2) & ownerdate>=(YR_PIS - 5) ~ "pre",
+                                half_mile == "less than" & ownerdate<=YR_PIS  & ownerdate>=(YR_PIS - 2) ~ "mid",
+                                half_mile == "less than" & ownerdate>YR_PIS ~ "post",
+                                half_mile == "more than" & ownerdate>=YR_PIS ~ "outside",
+                                TRUE ~ "other"))
+one_mile
+```
+
+5. Filter out all rows whose group is "other".
+
+```{r}
+one_mile <- one_mile[!grepl("other", one_mile$group),]
+one_mile
+```
+
+7. Create a column "Tpost" that, for homes in the "post" group gives the number of years that the sale occurred after the housing development was placed in service.
+```{r}
+post <- one_mile %>% 
+  filter(one_mile$group =="post") %>% 
+  mutate(Tpost = (ownerdate - YR_PIS))
+```
+
+8. Create a column named "age" which gives the age of the home at the time of sale.
+```{r}
+one_mile <- one_mile %>%
+  mutate(age = (ownerdate - year_built))
+one_mile
+```
+9. Filter down to only sales that took place within the five years before or after the associated development was placed in service.
+```{r}
+
+```
 
