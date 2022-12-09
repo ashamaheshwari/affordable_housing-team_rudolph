@@ -1,0 +1,130 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+rm(list = ls())
+```
+
+
+
+```{r}
+library("sf")
+library("leaflet")
+library("htmltools")
+library("scales")
+
+library(tidyverse)
+library(ggplot2)
+```
+
+
+
+
+```{r}
+LIHTC <- read_csv("data/LIHTC.csv")
+sales <- read_csv("data/filtered_sales.csv")
+properties <- read_csv("data/property_details.csv")
+barnes <- read_csv("data/barnes.csv")
+assessments <- read_csv("data/assessments.csv")
+
+
+```
+
+###1.  Using the sf library, find the closest development to each home. 
+Hint: You can convert a tibble to an sf object using the st_as_sf function. 
+
+Once converted, you can use the get_nearest_feature function.
+
+```{r}
+#convert to sf object
+LIHTC <- st_as_sf(LIHTC, coords =c("LONGITUDE","LATITUDE"), crs =4326) 
+```
+
+```{r}
+#remove () from centroid
+properties$centroid <- gsub("[()]", "", properties$centroid)
+```
+
+
+```{r}
+#separate centroid to lon and lat columns
+properties <- separate(data = properties, col = centroid, into = c("LONGITUDE", "LATITUDE"), sep = ",")
+```
+
+
+```{r}
+properties <- drop_na(properties)
+```
+
+
+```{r}
+#Convert properties to sf object
+properties_sf <- st_as_sf(properties, coords = c("LONGITUDE", "LATITUDE"), crs = 4326)
+#now has a geometry column point(...)
+```
+
+
+
+```{r}
+#for each feature in properties, the index of the nearest feature/geometry in LIHTC
+#empty geometries result in NA
+#nearest - index of the nearest development in LIHTC
+nearest <- st_nearest_feature(properties_sf, LIHTC)
+```
+
+```{r}
+names(which.max(nearest))
+```
+```{r}
+summary(nearest)
+```
+
+
+#2. Calculate distance from each home to its closest development
+```{r}
+#LIHTC[nearest, ] - subsets only rows that are nearest developments
+dist_miles = st_distance(properties_sf, LIHTC[nearest, ], by_element = TRUE) %>% 
+  units::set_units(mi)
+```
+
+```{r}
+LIHTC[nearest, ]
+```
+```{r}
+LIHTC[nearest, ] %>% summarize(n_distinct(HUD_ID))
+```
+~156k rows, only 155 unique developments, LIHTC[nearest, ] lists the closest development for each property
+
+
+
+
+```{r}
+#join the nearest development to properties_sf
+
+p_join = cbind(properties_sf, st_drop_geometry(LIHTC)[nearest, ])
+```
+
+```{r}
+#add distance column (distance between property and its closest development)
+p_join$distance <- dist_miles
+```
+
+
+```{r}
+p_join$distance
+```
+
+#3. Filter properties that are within a mile of a development
+```{r}
+library(units)
+#filter properties where distance <=1
+one_mile <- p_join %>% drop_units() %>% 
+  filter(distance<=1)
+```
+
+```{r}
+one_mile %>% summarise(max(distance))
+```
+
+
