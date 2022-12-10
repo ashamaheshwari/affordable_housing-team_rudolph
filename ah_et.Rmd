@@ -9,24 +9,26 @@ rm(list = ls())
 
 
 ```{r}
-library("sf")
-library("leaflet")
-library("htmltools")
-library("scales")
+library(sf)
+library(leaflet)
+library(htmltools)
+library(scales)
 
 library(tidyverse)
 library(ggplot2)
+library(units)
+library(stringr)
 ```
 
 
 
 
 ```{r}
-LIHTC <- read_csv("data/LIHTC.csv")
+LIHTC <- read_csv("data/LIHTC_updated.csv")
 sales <- read_csv("data/filtered_sales.csv")
 properties <- read_csv("data/property_details.csv")
 barnes <- read_csv("data/barnes.csv")
-assessments <- read_csv("data/assessments.csv")
+#assessments <- read_csv("data/assessments.csv")
 
 
 ```
@@ -117,7 +119,7 @@ p_join$distance
 
 #3. Filter properties that are within a mile of a development
 ```{r}
-library(units)
+
 #filter properties where distance <=1
 one_mile <- p_join %>% drop_units() %>% 
   filter(distance<=1)
@@ -126,5 +128,171 @@ one_mile <- p_join %>% drop_units() %>%
 ```{r}
 one_mile %>% summarise(max(distance))
 ```
+drop duplicates for sales
+
+```{r}
+sales <- sales[!duplicated(sales), ]
+
+```
+
+#4. For the remaining homes, calculate new column "group" using case_when
+
+##Merge one_mile and sales data
+```{r}
+one_mile_sales <- inner_join(one_mile, sales, by = "apn")
+```
+
+
+```{r}
+#keep only rows where yr_alloc < 8888
+one_mile_sales <- subset(one_mile_sales, YR_ALLOC<8888)
+```
+
+## Groups
+sale_date of property: ownerdate
+input year of development: YR_PIS
+
+sale_date was 2-5 years prior to input_year: YR_PIS - ownerdate >=2 and <=5
+sale_date was 0-2 years prior to input_year: YR_PIS - owner date >0 and <2
+
+```{r}
+
+one_mile_sales <- one_mile_sales %>% 
+  mutate(owner_yr = substr(ownerdate, 1, 4)) %>% 
+  transform(owner_yr = as.numeric(owner_yr))
+```
+
+YRPIS_ownerYR = YR_PIS - owner_yr
+  positive means sale date was before development (prior)
+  negative means sale date was after development (post)
+  
+```{r}
+one_mile_sales <- one_mile_sales %>% 
+  mutate(YRPIS_ownerYR = YR_PIS - owner_yr)
+```
+
+```{r}
+one_mile_sales <- one_mile_sales %>% 
+  mutate(time_window = case_when(
+  YRPIS_ownerYR <0 ~ "post",
+  ((YRPIS_ownerYR>=0)&(YRPIS_ownerYR <2)) ~ "0-2yrs_prior",
+  ((YRPIS_ownerYR >=2)&(YRPIS_ownerYR <=5)) ~ "2-5yrs_prior"
+))
+```
+
+
+
+```{r}
+one_mile_sales <- one_mile_sales %>%  
+  mutate(group = case_when(
+    ((distance <=0.5)&(time_window=="2-5yrs_prior")) ~ "pre",
+    ((distance <=0.5)&(time_window=="0-2yrs_prior")) ~ "mid",
+    ((distance <=0.5)&(time_window=="post")) ~ "post",
+    ((distance >0.5)&
+       ((time_window=="0-2yrs_prior")|(time_window=="2-5yrs_prior"))) ~ "outside",
+     TRUE ~ "other"
+  ))
+```
+
+
+```{r}
+one_mile_sales %>% select(distance, YRPIS_ownerYR, time_window, group) %>% view()
+
+```
+
+#5. Filter out rows whose group is "other"
+
+```{r}
+one_mile_sales <- subset(one_mile_sales, group!="other")
+```
+
+#6. Add an id column containing the id value for the development.
+
+HUD_ID
+
+#7. Create a column "Tpost" that, for homes in the "post" group gives the number of years that the sale occurred after the housing development was placed in service
+
+```{r}
+one_mile_sales <- one_mile_sales %>% 
+  mutate(Tpost = case_when(
+  group=="post" ~ owner_yr-YR_PIS
+))
+```
+
+```{r}
+one_mile_sales %>% select(owner_yr, YR_PIS, group, Tpost) %>% view()
+
+```
+
+#8. Create a column named "age" which gives the age of the home at the time of sale.
+
+```{r}
+one_mile_sales <- one_mile_sales %>% 
+  mutate(age = owner_yr - year_built)
+```
+
+
+#9. Filter down to only sales that took place within the five years before or after the associated development was placed in service.
+
+```{r}
+one_mi_five_yr <- one_mile_sales %>% 
+  filter(abs(YRPIS_ownerYR)<=5)
+```
+
+
+
+
+# Multiple Linear Regression
+
+```{r}
+mlm <- lm(formula = amount ~ square_footage + age + group + owner_yr + tract,
+          data = one_mi_five_yr)
+```
+
+```{r}
+summary(mlm)
+```
+
+amount = -6.29E6+76.3(square_footage)-646(age)
+        -1.22E4(groupoutside) -5.33E3(grouppost) -2.11E4(grouppre)
+        +3.57E3(owner_yr) -2.25E-2(tract)
+*When group is Mid (0-2 yrs prior) and all other variables=0, the price = -6.28E6??
+Interpretation for group coefficients
+* group mid is the reference group and other groups are compared to it.
+* -1.22E4 is the difference in avg home price between Mid group and Outside group
+  *homes outside 0.5 radius of devts cost ~12k less than homes built 0-2yrs prior
+   within 0.5mi of devts
+* -5.33E3 is the difference in price between Mid group and Post group.
+  * p-value = 0.322, so the difference is not significant.
+* -2.11E4 is the difference in price between Mid group and Pre group.
+  *homes in Pre group (built 2-5 yrs prior of devt) cost ~21k less on avg than homes
+   in Mid group(built 0-2 yrs prior of devt).
+
+
+#10. Linear model with log(sale price)
+
+
+```{r}
+mlm <- lm(formula = log(amount) ~ square_footage + age + group + owner_yr + tract,
+          data = one_mi_five_yr)
+
+summary(mlm)
+
+```
+
+
+
+```{r}
+(exp(coef(mlm))-1)*100
+```
+*for every additional square foot, the sale price increases by 0.04%
+*for each additional year of home age, the sale price decreases on average by 0.37%.
+*for each additional year of sale , the sale price increases on average by 3.2%
+
+Groups
+*Group mid is the reference
+*Group outside has 9.5% higher prices than group mid
+*Group post has 5.2% lower prices than group mid (0-2yrs prior)
+*Group pre (2-5yrs prior) has 1.3% lower prices than group mid(0-2yrs prior)
 
 
