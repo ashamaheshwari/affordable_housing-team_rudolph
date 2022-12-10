@@ -10,6 +10,7 @@ library(dplyr)
 ```
 
 ```{r}
+# reading all the datasets
 property_details<- read_csv('Affordable_Housing_DS6/property_details.csv')
 assessments<- read_csv('Affordable_Housing_DS6/assessments.csv')
 full_sales<- read_csv('Affordable_Housing_DS6/full_sales.csv')
@@ -19,6 +20,7 @@ LIHTC<- read_csv('Affordable_Housing_DS6/LIHTC.csv')
 ```
 
 ```{r}
+# To view the dataframes
 assessments
 filtered_sales
 LIHTC
@@ -26,7 +28,9 @@ property_details
 barnes
 ```
 
+1. Using the sf library, find the closest development to each home.
 ```{r}
+#Converting LIHTC to an sf object
 LIHTC <- st_as_sf(LIHTC, coords =c("LONGITUDE","LATITUDE"), crs = 4326)
 ```
 
@@ -43,30 +47,47 @@ map <- leaflet() %>%
 map
 ```
 
+Cleaning the property_details dataframe
 ```{r}
+# Removing the () from centroid column before spliting it to latitude and longitude to generate geomactry
 property_details$centroid <- gsub("[()]", "", property_details$centroid) #gsub function to remove () from centroid column
 property_details
 ```
+```{r}
+```
+
 
 ```{r}
+```
+
+```{r}
+# Spliting centroid column and renaming
 property_details <- cSplit(property_details, "centroid", ",") %>%
 rename("longitude" = "centroid_1","latitude" = "centroid_2")
 property_details
 ```
 
 ```{r}
+# droping na from property_details
 property_details <- drop_na(property_details) 
 ```
 
 ```{r}
+# converting to sf objects before merging
 property_details <- st_as_sf(property_details, coords =c("longitude","latitude"), crs = 4326)
 property_details
 ```
 
+
+
+
 ```{r}
+# Get nearest feature
 nearest_AH <- st_nearest_feature(property_details,LIHTC)
 nearest_AH
 ```
+
+2. Calculate the distance from each home its closest development.
 
 ```{r}
 distance_miles <- st_distance(property_details, LIHTC[nearest_AH,], by_element = T) %>%
@@ -76,34 +97,70 @@ distance_miles
 
 
 ```{r}
+# Merging two sf objects using cbind function 
 Merged <- cbind (property_details, LIHTC[nearest_AH,])
 Merged
 ```
 
+```{r}
+Merged$distance = distance_miles
+Merged
+```
+
+```{r}
+Merged$distance <- gsub("[mi]", "", Merged$distance) #gsub function to remove [mi] from distance column
+Merged
+```
+
+3. Filter the homes down to those that are within one mile of an affordable housing development.
+
+```{r}
+Merged_one_mile <- Merged %>%
+  filter(Merged$distance < 1)
+Merged_one_mile
+```
+
+
 
 ```{r}
 # Add circle marker styling options
-map <- leaflet() %>%
+Nashville <- leaflet() %>%
   addProviderTiles(provider = "CartoDB.Positron") %>%
   setView(lng = -86.7819, lat = 36.1766, zoom = 10) %>%
   setMaxBounds(lng1 = -86.7819 + 1,
                lat1 = 36.1766 + 1,
                lng2 = -86.7819- 1,
                lat2 = 36.1766 - 1) %>%
-  addCircleMarkers(data = Merged,
+  addCircleMarkers(data = Merged_one_mile,
                    radius = 1,
                    color = "white",
                    weight = 0.25,
                    fillColor = "red",
                    fillOpacity = 0.75)
 
-map
+Nashville
+```
+
+
+
+
+```{r}
+Merged_one_mile <- merge(Merged_one_mile, filtered_sales, by.x = "apn" , by.y = "apn")
+Merged_one_mile
+```
+```{r}
+Merged_one_mile <- Merged_one_mile %>% 
+       mutate(group = case_when(distance <= 0.5 & ownerdate<=(YR_PIS - 2) & ownerdate>=(YR_PIS - 5) ~ "pre",
+                                distance <= 0.5 & ownerdate<= YR_PIS & ownerdate>=(YR_PIS - 2) ~ "mid" ,
+                                distance <= 0.5 & ownerdate>YR_PIS ~ "post",
+                                distance > 0.5 & ownerdate>=YR_PIS ~ "outside",
+                                TRUE ~ "other"))
+Merged_one_mile
 ```
 
 
 ```{r}
+Merged_one_mile <- Merged_one_mile %>%
+  filter(Merged_one_mile$group == "outside")
 ```
 
-
-```{r}
-```
