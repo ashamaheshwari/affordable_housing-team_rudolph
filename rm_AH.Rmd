@@ -140,11 +140,6 @@ one_mile <- merge(one_mile, sales, by.x = "apn", by.y = "apn")
 one_mile
 ```
 
-```{r}
-#one_mile <- merge(one_mile, assessments, by.x = "apn", by.y = "apn")
-one_mile
-```
-
 # testing out case_when function
 ```{r}
 one_mile<- one_mile%>% 
@@ -174,7 +169,7 @@ one_mile <- one_mile %>%
        mutate(group = case_when(half_mile == "less than" & ownerdate<=(YR_PIS - 2) & ownerdate>=(YR_PIS - 5) ~ "pre",
                                 half_mile == "less than" & ownerdate<=YR_PIS  & ownerdate>=(YR_PIS - 2) ~ "mid",
                                 half_mile == "less than" & ownerdate>YR_PIS ~ "post",
-                                half_mile == "more than" & ownerdate>=YR_PIS ~ "outside",
+                                half_mile == "more than" & ownerdate>=(YR_PIS - 5)  ~ "outside",
                                 TRUE ~ "other"))
 one_mile
 ```
@@ -201,6 +196,44 @@ one_mile
 ```
 9. Filter down to only sales that took place within the five years before or after the associated development was placed in service.
 ```{r}
+filtered_sales_lm <- one_mile %>% 
+  filter((ownerdate-YR_PIS) <=5 & (YR_PIS-ownerdate) <=5)
+filtered_sales_lm
+```
 
+```{r}
+filtered_sales_lm2 <- one_mile %>% 
+  filter(abs(YR_PIS-ownerdate) <=5) 
+filtered_sales_lm2
+```
+
+
+Then build a linear model with target variable the sales amount using the following features:
+square_footage
+age of home at time of sale
+group
+year
+tract
+```{r}
+lm_model <- lm(amount ~ square_footage + 
+                 age + 
+                 group + 
+                 ownerdate + 
+                 tract,
+                 data = filtered_sales_lm)
+summary(lm_model)
+```
+How can you interpret the coefficients of this model?
+
+10. Now, try a model with target being the log of the sale price.
+
+```{r}
+lm_model_log <- lm(log(amount) ~ square_footage + 
+                 age + 
+                 group + 
+                 ownerdate + 
+                 tract,
+                 data = filtered_sales_lm)
+summary(lm_model_log)
 ```
 
