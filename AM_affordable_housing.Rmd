@@ -4,16 +4,13 @@ library(sf)
 library(leaflet)
 library(htmltools)
 library(scales)
-library(ggplot2)
 library(splitstackshape)
-library(dplyr)
 ```
 
 ```{r}
 # reading all the datasets
 property_details<- read_csv('Affordable_Housing_DS6/property_details.csv')
 assessments<- read_csv('Affordable_Housing_DS6/assessments.csv')
-full_sales<- read_csv('Affordable_Housing_DS6/full_sales.csv')
 filtered_sales<- read_csv('Affordable_Housing_DS6/filtered_sales.csv')
 barnes<- read_csv('Affordable_Housing_DS6/barnes.csv')
 LIHTC<- read_csv('Affordable_Housing_DS6/LIHTC.csv')
@@ -27,6 +24,48 @@ LIHTC
 property_details
 barnes
 ```
+
+# Removing duplicates from fitered_sales
+```{r}
+sales <- filtered_sales %>%
+         filter(!duplicated(.))
+# filtered_sales = 318834 observations
+# sales = 311327 observations
+```
+
+# Creating column for sales year
+```{r}
+sales <- sales %>% 
+          mutate(sale_year = str_extract(ownerdate, "([0-9]{4})"),
+               sale_year = as.integer(sale_year))
+```
+
+
+Cleaning the property_details dataframe
+```{r}
+# Removing the () from centroid column before spliting it to latitude and longitude to generate geomactry
+property_details$centroid <- gsub("[()]", "", property_details$centroid) #gsub function to remove () from centroid column
+property_details
+```
+
+```{r}
+# Spliting centroid column and renaming
+property <- cSplit(property_details, "centroid", ",") %>%
+rename("longitude" = "centroid_1","latitude" = "centroid_2")
+property
+```
+
+```{r}
+# droping na from property_details
+property <- drop_na(property) 
+```
+
+```{r}
+# converting to sf objects before merging
+property <- st_as_sf(property, coords =c("longitude","latitude"), crs = 4326)
+property
+```
+
 
 1. Using the sf library, find the closest development to each home.
 ```{r}
@@ -47,50 +86,17 @@ map <- leaflet() %>%
 map
 ```
 
-Cleaning the property_details dataframe
-```{r}
-# Removing the () from centroid column before spliting it to latitude and longitude to generate geomactry
-property_details$centroid <- gsub("[()]", "", property_details$centroid) #gsub function to remove () from centroid column
-property_details
-```
-```{r}
-```
-
-
-```{r}
-```
-
-```{r}
-# Spliting centroid column and renaming
-property_details <- cSplit(property_details, "centroid", ",") %>%
-rename("longitude" = "centroid_1","latitude" = "centroid_2")
-property_details
-```
-
-```{r}
-# droping na from property_details
-property_details <- drop_na(property_details) 
-```
-
-```{r}
-# converting to sf objects before merging
-property_details <- st_as_sf(property_details, coords =c("longitude","latitude"), crs = 4326)
-property_details
-```
-
-
-
 
 ```{r}
 # Get nearest feature
-nearest_AH <- st_nearest_feature(property_details,LIHTC)
+nearest_AH <- st_nearest_feature(property,LIHTC)
 nearest_AH
 ```
 
 2. Calculate the distance from each home its closest development.
 
 ```{r}
-distance_miles <- st_distance(property_details, LIHTC[nearest_AH,], by_element = T) %>%
+distance_miles <- st_distance(property, LIHTC[nearest_AH,], by_element = T) %>%
 units::set_units(mi)
 distance_miles
 ```
@@ -98,26 +104,32 @@ distance_miles
 
 ```{r}
 # Merging two sf objects using cbind function 
-Merged <- cbind (property_details, LIHTC[nearest_AH,])
-Merged
+property_LIHTC <- cbind (property, LIHTC[nearest_AH,])
+property_LIHTC
 ```
 
 ```{r}
-Merged$distance = distance_miles
-Merged
+# Adding distance columns to the merged  dataframe
+property_LIHTC$distance = distance_miles
+property_LIHTC
 ```
 
 ```{r}
-Merged$distance <- gsub("[mi]", "", Merged$distance) #gsub function to remove [mi] from distance column
-Merged
+property_LIHTC$distance <- gsub("[mi]", "", property_LIHTC$distance) #gsub function to remove [mi] from distance column
 ```
+
+```{r}
+property_sales_details <- merge(sales, property_LIHTC, by.x  = "apn" , by.y = "apn")
+property_sales_details
+```
+
 
 3. Filter the homes down to those that are within one mile of an affordable housing development.
 
 ```{r}
-Merged_one_mile <- Merged %>%
-  filter(Merged$distance < 1)
-Merged_one_mile
+homes_one_mile <- property_sales_details %>%
+  filter(property_sales_details$distance < 1)
+homes_one_mile
 ```
 
 
@@ -131,7 +143,7 @@ Nashville <- leaflet() %>%
                lat1 = 36.1766 + 1,
                lng2 = -86.7819- 1,
                lat2 = 36.1766 - 1) %>%
-  addCircleMarkers(data = Merged_one_mile,
+  addCircleMarkers(data = homes_one_mile,
                    radius = 1,
                    color = "white",
                    weight = 0.25,
@@ -143,24 +155,65 @@ Nashville
 
 
 
+ 
+
 
 ```{r}
-Merged_one_mile <- merge(Merged_one_mile, filtered_sales, by.x = "apn" , by.y = "apn")
-Merged_one_mile
-```
-```{r}
-Merged_one_mile <- Merged_one_mile %>% 
+homes_one_mile <- homes_one_mile %>% 
        mutate(group = case_when(distance <= 0.5 & ownerdate<=(YR_PIS - 2) & ownerdate>=(YR_PIS - 5) ~ "pre",
                                 distance <= 0.5 & ownerdate<= YR_PIS & ownerdate>=(YR_PIS - 2) ~ "mid" ,
                                 distance <= 0.5 & ownerdate>YR_PIS ~ "post",
                                 distance > 0.5 & ownerdate>=YR_PIS ~ "outside",
                                 TRUE ~ "other"))
-Merged_one_mile
+homes_one_mile
 ```
 
 
 ```{r}
-Merged_one_mile <- Merged_one_mile %>%
-  filter(Merged_one_mile$group == "outside")
+homes_one_mile<- homes_one_mile %>%
+  filter(homes_one_mile$group != "outside")
+homes_one_mile
+
+```
+#6 Add an id column containing id value for the development.
+```{r}
+
+```
+
+#7. Create a column "Tpost" that, for homes in the "post" group gives the number of years that the sale occurred after the housing development was placed in service.
+
+```{r}
+post <- homes_one_mile %>% 
+  filter(homes_one_mile$group =="post") %>% 
+  mutate(Tpost = (sale_year - YR_PIS))
+post
+```
+
+#8. Create a column named "age" which gives the age of the home at the time of sale.
+```{r}
+homes_one_mile <- homes_one_mile %>%
+  mutate(age = (sale_year - year_built))
+homes_one_mile
+```
+
+#9. Filter down to only sales that took place within the five years before or after the associated development was placed in service. 
+
+```{r}
+filtered_sales_dev1 <- homes_one_mile %>%
+  filter((sale_year - YR_PIS) <= 5 & (YR_PIS- sale_year) <= 5)
+filtered_sales_dev1
+```
+#Then build a linear model with target variable the sales amount using the following features:
+square_footage
+age of home at time of sale
+group
+year
+tract How can you interpret the coefficients of this model?
+
+
+
+```{r}
+linear_model <- lm(amount ~ square_footage + age + group + sale_year, data = filtered_sales_dev1)
+summary(linear_model)
 ```
 
