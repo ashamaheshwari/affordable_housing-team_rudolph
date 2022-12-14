@@ -173,6 +173,17 @@ one_mile <- one_mile %>%
                                 TRUE ~ "other"))
 one_mile
 ```
+```{r}
+table(one_mile$group)
+```
+
+```{r}
+out <- one_mile %>% 
+  filter(one_mile$group =="outside")
+out
+```
+
+
 
 5. Filter out all rows whose group is "other".
 
@@ -182,10 +193,12 @@ one_mile
 ```
 
 7. Create a column "Tpost" that, for homes in the "post" group gives the number of years that the sale occurred after the housing development was placed in service.
+
 ```{r}
-post <- one_mile %>% 
-  filter(one_mile$group =="post") %>% 
-  mutate(Tpost = (ownerdate - YR_PIS))
+one_mile <- one_mile %>%
+  mutate(Tpost = case_when(
+  group=="post" ~ ownerdate-YR_PIS
+))
 ```
 
 8. Create a column named "age" which gives the age of the home at the time of sale.
@@ -219,7 +232,7 @@ lm_model <- lm(amount ~ square_footage +
                  age + 
                  group + 
                  ownerdate + 
-                 tract,
+                 factor(tract),
                  data = filtered_sales_lm)
 summary(lm_model)
 ```
@@ -232,8 +245,14 @@ lm_model_log <- lm(log(amount) ~ square_footage +
                  age + 
                  group + 
                  ownerdate + 
-                 tract,
+                 factor(tract),
                  data = filtered_sales_lm)
 summary(lm_model_log)
 ```
+
+```{r}
+ggplot(filtered_sales_lm, aes(log(square_footage),log(amount))) +
+  geom_point(alpha=0.5, na.rm=TRUE)
+```
+
 
