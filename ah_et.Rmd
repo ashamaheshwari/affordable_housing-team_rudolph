@@ -33,6 +33,24 @@ barnes <- read_csv("data/barnes.csv")
 
 ```
 
+drop duplicates for sales
+
+```{r}
+sales <- sales[!duplicated(sales), ]
+
+```
+
+Remove 9999 and 8888 from LIHTC YRPIS
+
+```{r}
+LIHTC <- subset(LIHTC, YR_PIS <8888)
+```
+
+```{r}
+
+```
+
+
 ###1.  Using the sf library, find the closest development to each home. 
 Hint: You can convert a tibble to an sf object using the st_as_sf function. 
 
@@ -114,7 +132,7 @@ p_join$distance <- dist_miles
 
 
 ```{r}
-p_join$distance
+#p_join$distance
 ```
 
 #3. Filter properties that are within a mile of a development
@@ -123,29 +141,29 @@ p_join$distance
 #filter properties where distance <=1
 one_mile <- p_join %>% drop_units() %>% 
   filter(distance<=1)
+
+dim(one_mile)
 ```
 
 ```{r}
 one_mile %>% summarise(max(distance))
 ```
-drop duplicates for sales
 
-```{r}
-sales <- sales[!duplicated(sales), ]
 
-```
 
 #4. For the remaining homes, calculate new column "group" using case_when
 
 ##Merge one_mile and sales data
 ```{r}
 one_mile_sales <- inner_join(one_mile, sales, by = "apn")
+dim(one_mile_sales)
 ```
 
 
 ```{r}
 #keep only rows where yr_alloc < 8888
-one_mile_sales <- subset(one_mile_sales, YR_ALLOC<8888)
+#one_mile_sales <- subset(one_mile_sales, YR_ALLOC<8888)
+#dim(one_mile_sales)
 ```
 
 ## Groups
@@ -153,13 +171,15 @@ sale_date of property: ownerdate
 input year of development: YR_PIS
 
 sale_date was 2-5 years prior to input_year: YR_PIS - ownerdate >=2 and <=5
-sale_date was 0-2 years prior to input_year: YR_PIS - owner date >0 and <2
+sale_date was 0-2 years prior to input_year: YR_PIS - owner date >=0 and <2
 
 ```{r}
-
+#Make owner_yr column from ownerdate
 one_mile_sales <- one_mile_sales %>% 
   mutate(owner_yr = substr(ownerdate, 1, 4)) %>% 
   transform(owner_yr = as.numeric(owner_yr))
+
+dim(one_mile_sales)
 ```
 
 YRPIS_ownerYR = YR_PIS - owner_yr
@@ -169,6 +189,8 @@ YRPIS_ownerYR = YR_PIS - owner_yr
 ```{r}
 one_mile_sales <- one_mile_sales %>% 
   mutate(YRPIS_ownerYR = YR_PIS - owner_yr)
+
+dim(one_mile_sales)
 ```
 
 ```{r}
@@ -180,6 +202,12 @@ one_mile_sales <- one_mile_sales %>%
 ))
 ```
 
+check unique values for time window (year groupings)
+
+```{r}
+table(one_mile_sales$group)
+```
+
 
 
 ```{r}
@@ -189,10 +217,23 @@ one_mile_sales <- one_mile_sales %>%
     ((distance <=0.5)&(time_window=="0-2yrs_prior")) ~ "mid",
     ((distance <=0.5)&(time_window=="post")) ~ "post",
     ((distance >0.5)&
-       ((time_window=="0-2yrs_prior")|(time_window=="2-5yrs_prior"))) ~ "outside",
+       ((time_window=="0-2yrs_prior")|(time_window=="2-5yrs_prior")|(time_window == "post"))) ~ "outside",
      TRUE ~ "other"
   ))
 ```
+
+
+
+```{r}
+table(one_mile_sales$group)
+```
+```{r}
+one_mile_sales %>% filter(group == "outside") %>% select(group, distance, time_window, YR_PIS, owner_yr,  YRPIS_ownerYR ) %>% view()
+
+dim(one_mile_sales)
+```
+
+
 
 
 ```{r}
@@ -200,11 +241,19 @@ one_mile_sales %>% select(distance, YRPIS_ownerYR, time_window, group) %>% view(
 
 ```
 
+
+
 #5. Filter out rows whose group is "other"
 
 ```{r}
 one_mile_sales <- subset(one_mile_sales, group!="other")
+
+dim(one_mile_sales)
 ```
+
+
+
+
 
 #6. Add an id column containing the id value for the development.
 
@@ -217,6 +266,8 @@ one_mile_sales <- one_mile_sales %>%
   mutate(Tpost = case_when(
   group=="post" ~ owner_yr-YR_PIS
 ))
+
+dim(one_mile_sales)
 ```
 
 ```{r}
@@ -237,6 +288,7 @@ one_mile_sales <- one_mile_sales %>%
 ```{r}
 one_mi_five_yr <- one_mile_sales %>% 
   filter(abs(YRPIS_ownerYR)<=5)
+dim(one_mi_five_yr)
 ```
 
 
@@ -273,13 +325,16 @@ Interpretation for group coefficients
 
 
 ```{r}
-mlm <- lm(formula = log(amount) ~ square_footage + age + group + owner_yr + tract,
+mlm <- lm(formula = log(amount) ~ square_footage + age + group + owner_yr + factor(tract),
           data = one_mi_five_yr)
 
 summary(mlm)
 
 ```
 
+```{r}
+exp(coef(mlm)["grouppost"] - coef(mlm)["grouppre"])
+```
 
 
 ```{r}
@@ -295,4 +350,7 @@ Groups
 *Group post has 5.2% lower prices than group mid (0-2yrs prior)
 *Group pre (2-5yrs prior) has 1.3% lower prices than group mid(0-2yrs prior)
 
+```{r}
+log(100)
+```
 
