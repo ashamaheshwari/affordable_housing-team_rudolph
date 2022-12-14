@@ -14,6 +14,7 @@ assessments<- read_csv('Affordable_Housing_DS6/assessments.csv')
 filtered_sales<- read_csv('Affordable_Housing_DS6/filtered_sales.csv')
 barnes<- read_csv('Affordable_Housing_DS6/barnes.csv')
 LIHTC<- read_csv('Affordable_Housing_DS6/LIHTC.csv')
+LIHTC <- LIHTC[-c(1, 2, 3, 4, 5), ]
 ```
 
 ```{r}
@@ -58,6 +59,9 @@ property
 ```{r}
 # droping na from property_details
 property <- drop_na(property) 
+
+#property_details = 156727
+#property = 155837
 ```
 
 ```{r}
@@ -68,6 +72,11 @@ property
 
 
 1. Using the sf library, find the closest development to each home.
+
+```{r}
+
+```
+
 ```{r}
 #Converting LIHTC to an sf object
 LIHTC <- st_as_sf(LIHTC, coords =c("LONGITUDE","LATITUDE"), crs = 4326)
@@ -106,6 +115,8 @@ distance_miles
 # Merging two sf objects using cbind function 
 property_LIHTC <- cbind (property, LIHTC[nearest_AH,])
 property_LIHTC
+
+# property_LIHTC = 155837 observations (same as property)
 ```
 
 ```{r}
@@ -121,6 +132,9 @@ property_LIHTC$distance <- gsub("[mi]", "", property_LIHTC$distance) #gsub funct
 ```{r}
 property_sales_details <- merge(sales, property_LIHTC, by.x  = "apn" , by.y = "apn")
 property_sales_details
+
+# sales = 311327 observations
+# property_sales_details = 309,739 observations
 ```
 
 
@@ -130,6 +144,8 @@ property_sales_details
 homes_one_mile <- property_sales_details %>%
   filter(property_sales_details$distance < 1)
 homes_one_mile
+
+# 139,026 observations
 ```
 
 
@@ -138,11 +154,11 @@ homes_one_mile
 # Add circle marker styling options
 Nashville <- leaflet() %>%
   addProviderTiles(provider = "CartoDB.Positron") %>%
-  setView(lng = -86.7819, lat = 36.1766, zoom = 10) %>%
-  setMaxBounds(lng1 = -86.7819 + 1,
-               lat1 = 36.1766 + 1,
-               lng2 = -86.7819- 1,
-               lat2 = 36.1766 - 1) %>%
+  setView(longitude = -86.7819, latitude = 36.1766, zoom = 10) %>%
+  setMaxBounds(longitude1 = -86.7819 + 1,
+               latitude1 = 36.1766 + 1,
+               longitude2 = -86.7819- 1,
+               latitude2 = 36.1766 - 1) %>%
   addCircleMarkers(data = homes_one_mile,
                    radius = 1,
                    color = "white",
@@ -153,40 +169,64 @@ Nashville <- leaflet() %>%
 Nashville
 ```
 
-
-
- 
-
+```{r}
+homes_one_mile <- homes_one_mile %>% 
+  mutate(YRPIS_sale_year = YR_PIS - sale_year)
+```
 
 ```{r}
 homes_one_mile <- homes_one_mile %>% 
-       mutate(group = case_when(distance <= 0.5 & ownerdate<=(YR_PIS - 2) & ownerdate>=(YR_PIS - 5) ~ "pre",
-                                distance <= 0.5 & ownerdate<= YR_PIS & ownerdate>=(YR_PIS - 2) ~ "mid" ,
-                                distance <= 0.5 & ownerdate>YR_PIS ~ "post",
-                                distance > 0.5 & ownerdate>=YR_PIS ~ "outside",
-                                TRUE ~ "other"))
+  mutate(time_window = case_when(
+  YRPIS_sale_year < 0 ~ "post",
+  ((YRPIS_sale_year >=0)&(YRPIS_sale_year < 2)) ~ "0-2yrs_prior",
+  ((YRPIS_sale_year >=2)&(YRPIS_sale_year <=5)) ~ "2-5yrs_prior"
+))
+```
+
+```{r}
+homes_one_mile <- homes_one_mile %>%  
+  mutate(group = case_when(
+    ((distance <=0.5)&(time_window=="2-5yrs_prior")) ~ "pre",
+    ((distance <=0.5)&(time_window=="0-2yrs_prior")) ~ "mid",
+    ((distance <=0.5)&(time_window=="post")) ~ "post",
+    ((distance >0.5)&
+       ((time_window =="0-2yrs_prior")|(time_window=="2-5yrs_prior")|(time_window == "post") )) ~ "outside",
+     TRUE ~ "other"
+  ))
 homes_one_mile
 ```
+
+```{r}
+table(homes_one_mile$group)
+```
+
 
 
 ```{r}
 homes_one_mile<- homes_one_mile %>%
-  filter(homes_one_mile$group != "outside")
+  filter(homes_one_mile$group != "other")
 homes_one_mile
 
 ```
-#6 Add an id column containing id value for the development.
-```{r}
 
+```{r}
+table(homes_one_mile$group)
 ```
+
+#6 Add an id column containing id value for the development.
+
+hud ID
 
 #7. Create a column "Tpost" that, for homes in the "post" group gives the number of years that the sale occurred after the housing development was placed in service.
 
 ```{r}
-post <- homes_one_mile %>% 
-  filter(homes_one_mile$group =="post") %>% 
-  mutate(Tpost = (sale_year - YR_PIS))
-post
+
+homes_one_mile$Tpost <- 
+  ifelse(homes_one_mile$group == "post", 
+         homes_one_mile$sale_year - homes_one_mile$YR_PIS,
+         NA)
+homes_one_mile
+
 ```
 
 #8. Create a column named "age" which gives the age of the home at the time of sale.
@@ -198,11 +238,15 @@ homes_one_mile
 
 #9. Filter down to only sales that took place within the five years before or after the associated development was placed in service. 
 
+
+
+
 ```{r}
-filtered_sales_dev1 <- homes_one_mile %>%
-  filter((sale_year - YR_PIS) <= 5 & (YR_PIS- sale_year) <= 5)
-filtered_sales_dev1
+filtered_sales_five_YR <- homes_one_mile %>%
+  filter(abs(YRPIS_sale_year) <=5)
+filtered_sales_five_YR
 ```
+
 #Then build a linear model with target variable the sales amount using the following features:
 square_footage
 age of home at time of sale
@@ -213,7 +257,15 @@ tract How can you interpret the coefficients of this model?
 
 
 ```{r}
-linear_model <- lm(amount ~ square_footage + age + group + sale_year, data = filtered_sales_dev1)
+linear_model <- lm(amount ~ square_footage + age + group + sale_year + factor(tract), data = filtered_sales_five_YR)
 summary(linear_model)
+```
+
+
+#10. Now, try a model with target being the log of the sale price.
+
+```{r}
+log_linear_model <- lm(log(amount) ~ square_footage + age + group + sale_year + factor(tract), data = filtered_sales_five_YR)
+summary(log_linear_model)
 ```
 
