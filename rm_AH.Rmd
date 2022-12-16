@@ -19,6 +19,8 @@ library(htmlwidgets)
 library(splitstackshape)
 library(RColorBrewer)
 library(viridisLite)
+library(shiny)
+library(shinydashboard)
 ```
 
 
@@ -72,16 +74,6 @@ properties
 ```
 
 ```{r}
-# simple map of locations within Davidson County
-nash %>% 
-leaflet()  %>% 
-    addProviderTiles("CartoDB.Positron")  %>% 
-    addPolygons(color ="white", opacity=5) %>%
-    addCircleMarkers(data = LIHTC, radius = 1 , popup = LIHTC$PROJECT, color="red") %>%
-    setView(lat = 36.1627, lng = -86.7816, zoom = 11)
-```
-
-```{r}
 lihtc_drop <- LIHTC[-c(1, 2, 3, 4, 5), ]
 ```
 
@@ -121,20 +113,7 @@ one_mile <- p_join %>% #filter down to homes within 1 mile
   filter(p_join$distance<1)
 ```
 
-```{r}
-one_mile
-```
-```{r}
-# map of properties within one mile 
-nash %>% 
-leaflet()  %>% 
-    addProviderTiles("Stamen.TonerHybrid")  %>% 
-    addPolygons(color ="grey", opacity=1) %>%
-    addCircleMarkers(data = one_mile, radius = 1 , popup = one_mile$PROJECT, 
-                     color="blue", opacity=0.1, clusterOptions = markerClusterOptions()) %>%
-    addCircleMarkers(data = lihtc_drop, radius = 4 , popup = lihtc_drop$PROJECT, color="red") %>%
-    setView(lat = 36.1627, lng = -86.7816, zoom = 11)
-```
+
 ```{r}
 one_mile <- merge(one_mile, sales, by.x = "apn", by.y = "apn")
 one_mile
@@ -251,8 +230,81 @@ summary(lm_model_log)
 ```
 
 ```{r}
-ggplot(filtered_sales_lm, aes(log(square_footage),log(amount))) +
+ggplot(filtered_sales_lm, aes(log(square_footage),log(amount), color=group)) +
   geom_point(alpha=0.5, na.rm=TRUE)
 ```
+```{r}
+pre <- one_mile %>% 
+  filter(group=="pre")
+post <- one_mile %>% 
+  filter(group=="post")
+outside <- one_mile %>% 
+  filter(group=="outside")
+mid <- one_mile %>% 
+  filter(group=="mid")
+```
+
+```{r}
+zip <- st_read("Zip Codes.geojson")
+```
+
+
+```{r}
+# simple map of locations within Davidson County
+zip %>% 
+leaflet()  %>% 
+    addProviderTiles("Stamen.TonerHybrid")  %>% 
+    addPolygons(color ="grey", opacity=1, weight = 1,
+                highlightOptions = highlightOptions(
+                weight = 5,
+                fillOpacity = 0.7,
+                bringToFront = FALSE),
+                label=zip$zipcode) %>%
+    addCircleMarkers(data = pre, radius = 1 , weight=0.5, color="mediumspringgreen", group="pre") %>%
+    addCircleMarkers(data = post, radius = 1 , weight=0.5, color="blue",group="post") %>%
+    addCircleMarkers(data = outside, radius = 1 , weight=0.5, color="purple",group="outside") %>%
+    addCircleMarkers(data = mid, radius = 1 , weight=0.5, color="violet",group="mid") %>%
+    addCircleMarkers(data = LIHTC, radius = 1 , popup = LIHTC$PROJECT, color="red") %>%
+      addLayersControl(
+        overlayGroups = c("pre", "post", "outside", "mid"),
+        options = layersControlOptions(collapsed = FALSE)
+        ) %>% hideGroup(c("pre", "post", "outside", "mid")) %>% 
+        setView(lat = 36.1627, lng = -86.7816, zoom = 11)
+```
+
+```{r}
+# map of properties within one mile 
+nash %>% 
+leaflet()  %>% 
+    addProviderTiles("Stamen.TonerHybrid")  %>% 
+    addPolygons(color ="grey", opacity=1, weight= 0.5) %>%
+    addCircleMarkers(data = one_mile, radius = 1 , popup = one_mile$PROJECT, 
+                     color="blue", opacity=0.1, clusterOptions = markerClusterOptions()) %>%
+    addCircleMarkers(data = lihtc_drop, radius = 4 , popup = lihtc_drop$PROJECT, color="red") %>%
+    setView(lat = 36.1627, lng = -86.7816, zoom = 11)
+```
+
+
+```{r}
+filter <- filtered_sales_lm[ , c("amount", "square_footage", "age", "group", "ownerdate", "tract")]
+filter
+```
+
+```{r}
+filter$geometry <- NULL
+filter
+```
+```{r}
+filter <- filter %>% 
+  filter(amount < 9000000)
+filter
+```
+
+
+```{r}
+#write.csv(filter, "filter.csv", row.names = FALSE)
+```
+
+
 
 
